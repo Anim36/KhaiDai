@@ -452,12 +452,20 @@ export function TopNav({
         {!compactOnMobile ? (
           <div
             className={
-              "grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none " +
-              (rowsExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]")
+              // Animate a fixed `max-height` instead of `grid-template-rows`.
+              // The grid-rows trick (1fr ↔ 0fr) is the modern height-transition
+              // pattern, but on mobile the inner row has a fixed `h-10` so the
+              // browser re-lays-out every frame, which makes the pills visibly
+              // tremble instead of gliding. max-height transitions interpolate
+              // cleanly and avoid the mid-animation re-layout.
+              "overflow-hidden transition-[max-height,opacity] duration-200 ease-out motion-reduce:transition-none " +
+              (rowsExpanded
+                ? "max-h-[120px] opacity-100"
+                : "max-h-0 opacity-0")
             }
             aria-hidden={!rowsExpanded}
           >
-            <div className="flex min-h-0 flex-col gap-1.5 overflow-hidden">
+            <div className="flex min-h-0 flex-col gap-1.5">
               {/* Row 2: location pill (full width, truncated) */}
               <button
                 type="button"
