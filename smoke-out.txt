@@ -1,0 +1,64 @@
+◇ injected env (12) from .env
+
+== logged in (customer / partner / admin) ==
+
+== 1. bKash checkout opens an SSLCommerz session ==
+  PASS  POST /api/orders creates the order
+  PASS  new order starts at paymentGatewayStatus=NOT_INITIATED
+  PASS  new order status is PENDING
+  PASS  POST /init returns a GatewayPageURL
+  PASS  GatewayPageURL points at the SSLCommerz sandbox
+  ->  https://sandbox.sslcommerz.com/EasyCheckOut/testcde4bb0d9f573975bddfd71cd5ef881fe90…
+  PASS  after init: paymentGatewayStatus=PENDING
+  PASS  after init: gatewaySessionKey is stored
+
+== 2. security: a spoofed success redirect is rejected ==
+  PASS  spoofed success does NOT set PAID (server-to-server validation ran)
+  PASS  spoofed success leaves Order.status at PENDING
+  PASS  spoofed success redirects back to /checkout
+
+== 3. unpaid orders never reach the partner dashboard ==
+  PASS  partner queue hides the unpaid nptnep order
+
+== 4. cancel callback ==
+  PASS  cancel sets paymentGatewayStatus=CANCELLED
+  PASS  cancel leaves Order.status untouched (PENDING)
+  PASS  cancel redirects back to /checkout with an error message
+
+== 5. retry after a cancel is allowed ==
+  PASS  a cancelled order can re-init a fresh session
+
+== 6. fail callback ==
+  PASS  fail sets paymentGatewayStatus=FAILED
+  PASS  fail leaves Order.status untouched (PENDING)
+  PASS  fail redirects back to /checkout with an error
+
+== 7. Cash on Delivery is untouched ==
+  PASS  COD order is created
+  PASS  COD order has paymentMethod=CASH
+  PASS  COD order stays NOT_INITIATED (never touches the gateway)
+  PASS  init refuses a COD order (409)
+  PASS  partner queue DOES show the COD order
+  PASS  partner queue still hides the abandoned bKash order
+
+== 8. dispatch is blocked until the payment is PAID ==
+  PASS  dispatch on an unpaid gateway order is refused (409)
+
+== 9. IPN is idempotent + validates server-to-server ==
+  PASS  IPN with a bogus val_id still answers 200
+  PASS  IPN with a bogus val_id does NOT mark PAID
+
+== 10. admin sees paymentGatewayStatus + txn id ==
+  PASS  admin order list includes the bKash order
+  PASS  admin row carries paymentMethod
+  PASS  admin row carries paymentGatewayStatus
+  PASS  admin row carries gatewayTransactionId (null when unconfirmed)
+  PASS  admin detail includes paymentGatewayStatus
+  PASS  admin detail includes gatewayTransactionId key
+  PASS  /api/orders/[id] exposes paymentGatewayStatus
+  PASS  /api/orders/[id] exposes gatewayTransactionId
+
+== RESULT: 35 passed, 0 failed ==
+
+test order id: cmupc596l0006zkbx7gnptnep
+cod order id : cmupc5a6c0009zkbx5px9moza

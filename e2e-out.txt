@@ -1,0 +1,56 @@
+◇ injected env (12) from .env
+order created: cmupc9nx7000czkbx3v52ycy7
+gateway page: https://sandbox.sslcommerz.com/EasyCheckOut/testcdef9bc9415adfae910aac2badf0f1d3b08
+checkout page: HTTP 200, 2012 bytes
+form action: null
+hidden fields: 
+cardname value: null
+
+Could not auto-drive the gateway form. Page snippet:
+ <!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1">
+  <title>easyCheckout</title>
+  <link href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700" rel="stylesheet">
+  <!--<link href="https://fonts.googleapis.com/css?family=Montserrat:100,200,300,400,500,600,700,800,900" rel="stylesheet">-->
+  <!--<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">-->
+  <!--<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css">-->
+  <!--<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/3.7.0/animate.min.css">-->
+  <base href="https://sandbox.sslcommerz.com/EasyCheckOut/">
+</head>
+
+<body class="h-100 mobile_device">
+  <div class="main_wrapper w-100 d-table">
+    <div class="d-table-cell align-middle">
+      <div class="">
+        <div class="card-wrapper animated slideInLeft"></div>
+        <app-root></app-root>
+      </div>
+    </div>
+  </div>
+<script type="text/javascript" src="runtime.js"></script><script type="text/javascript" src="polyfills.js"></script><script type="text/javascript" src="styles.js"></script><script type="text/javascript" src="scripts.js"></script><script type="text/javascript" src="vendor.js"></script><script type="text/javascript" src="main.js"></script></body>
+
+<script>
+  $('.nav-tabs').on('show.bs.tab', 'a', function(event) {
+    event.preventDefault();
+  });
+  $('.nav-tabs').on('hide.bs.tab', 'a', function(event) {
+    event.preventDefault();
+  });
+</script>
+
+<!-- Global site tag (gtag.js) - Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-32646854-4"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'UA-32646854-4');
+</script>
+
+</html>
+

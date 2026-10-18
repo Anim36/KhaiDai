@@ -1,0 +1,6 @@
+{
+  "version": 2,
+  "regions": ["sin1"],
+  "buildCommand": "prisma generate && next build",
+  "installCommand": "prisma generate"
+}

@@ -1,0 +1,526 @@
+{
+  "generatedAt": "2026-10-17T16:02:05.652Z",
+  "widths": [
+    320,
+    375,
+    414,
+    768,
+    1024,
+    1280,
+    1440
+  ],
+  "thresholds": {
+    "maxClippedText": 6,
+    "maxOverlaps": 3,
+    "maxFixedEscape": 0
+  },
+  "summary": {
+    "totalChecks": 280,
+    "overflows": 0,
+    "consoleErrors": 0,
+    "tinyTargetRatios": 55,
+    "clippedTextPages": 1,
+    "overlapPages": 0,
+    "fixedEscapePages": 0,
+    "deepFailures": 1,
+    "loginFailures": []
+  },
+  "overflows": [],
+  "consoleErrors": [],
+  "tinyTargetRatios": [
+    {
+      "url": "http://localhost:3000/profile",
+      "width": 320,
+      "role": "CUSTOMER",
+      "ratio": 0.55,
+      "total": 40,
+      "tiny": 22
+    },
+    {
+      "url": "http://localhost:3000/profile",
+      "width": 375,
+      "role": "CUSTOMER",
+      "ratio": 0.55,
+      "total": 40,
+      "tiny": 22
+    },
+    {
+      "url": "http://localhost:3000/profile",
+      "width": 414,
+      "role": "CUSTOMER",
+      "ratio": 0.55,
+      "total": 40,
+      "tiny": 22
+    },
+    {
+      "url": "http://localhost:3000/checkout",
+      "width": 320,
+      "role": "CUSTOMER",
+      "ratio": 0.5945945945945946,
+      "total": 37,
+      "tiny": 22
+    },
+    {
+      "url": "http://localhost:3000/checkout",
+      "width": 375,
+      "role": "CUSTOMER",
+      "ratio": 0.5945945945945946,
+      "total": 37,
+      "tiny": 22
+    },
+    {
+      "url": "http://localhost:3000/checkout",
+      "width": 414,
+      "role": "CUSTOMER",
+      "ratio": 0.5945945945945946,
+      "total": 37,
+      "tiny": 22
+    },
+    {
+      "url": "http://localhost:3000/rider/dashboard",
+      "width": 414,
+      "role": "RIDER",
+      "ratio": 0.37037037037037035,
+      "total": 27,
+      "tiny": 10
+    },
+    {
+      "url": "http://localhost:3000/admin/users",
+      "width": 375,
+      "role": "ADMIN",
+      "ratio": 0.5483870967741935,
+      "total": 93,
+      "tiny": 51
+    },
+    {
+      "url": "http://localhost:3000/admin/users",
+      "width": 414,
+      "role": "ADMIN",
+      "ratio": 0.5483870967741935,
+      "total": 93,
+      "tiny": 51
+    },
+    {
+      "url": "http://localhost:3000/admin/restaurants",
+      "width": 375,
+      "role": "ADMIN",
+      "ratio": 0.6046511627906976,
+      "total": 43,
+      "tiny": 26
+    },
+    {
+      "url": "http://localhost:3000/admin/restaurants",
+      "width": 414,
+      "role": "ADMIN",
+      "ratio": 0.6046511627906976,
+      "total": 43,
+      "tiny": 26
+    },
+    {
+      "url": "http://localhost:3000/admin/orders",
+      "width": 375,
+      "role": "ADMIN",
+      "ratio": 0.46875,
+      "total": 32,
+      "tiny": 15
+    },
+    {
+      "url": "http://localhost:3000/admin/orders",
+      "width": 414,
+      "role": "ADMIN",
+      "ratio": 0.46875,
+      "total": 32,
+      "tiny": 15
+    },
+    {
+      "url": "http://localhost:3000/",
+      "width": 320,
+      "role": "PUBLIC",
+      "ratio": 0.5365853658536586,
+      "total": 41,
+      "tiny": 22
+    },
+    {
+      "url": "http://localhost:3000/",
+      "width": 375,
+      "role": "PUBLIC",
+      "ratio": 0.4489795918367347,
+      "total": 49,
+      "tiny": 22
+    },
+    {
+      "url": "http://localhost:3000/",
+      "width": 414,
+      "role": "PUBLIC",
+      "ratio": 0.46938775510204084,
+      "total": 49,
+      "tiny": 23
+    },
+    {
+      "url": "http://localhost:3000/restaurants",
+      "width": 320,
+      "role": "PUBLIC",
+      "ratio": 0.3559322033898305,
+      "total": 59,
+      "tiny": 21
+    },
+    {
+      "url": "http://localhost:3000/restaurants",
+      "width": 375,
+      "role": "PUBLIC",
+      "ratio": 0.3559322033898305,
+      "total": 59,
+      "tiny": 21
+    },
+    {
+      "url": "http://localhost:3000/restaurants",
+      "width": 414,
+      "role": "PUBLIC",
+      "ratio": 0.3559322033898305,
+      "total": 59,
+      "tiny": 21
+    },
+    {
+      "url": "http://localhost:3000/about",
+      "width": 320,
+      "role": "PUBLIC",
+      "ratio": 0.65625,
+      "total": 32,
+      "tiny": 21
+    },
+    {
+      "url": "http://localhost:3000/about",
+      "width": 375,
+      "role": "PUBLIC",
+      "ratio": 0.65625,
+      "total": 32,
+      "tiny": 21
+    },
+    {
+      "url": "http://localhost:3000/about",
+      "width": 414,
+      "role": "PUBLIC",
+      "ratio": 0.65625,
+      "total": 32,
+      "tiny": 21
+    },
+    {
+      "url": "http://localhost:3000/help",
+      "width": 320,
+      "role": "PUBLIC",
+      "ratio": 0.5476190476190477,
+      "total": 42,
+      "tiny": 23
+    },
+    {
+      "url": "http://localhost:3000/help",
+      "width": 375,
+      "role": "PUBLIC",
+      "ratio": 0.5476190476190477,
+      "total": 42,
+      "tiny": 23
+    },
+    {
+      "url": "http://localhost:3000/help",
+      "width": 414,
+      "role": "PUBLIC",
+      "ratio": 0.5476190476190477,
+      "total": 42,
+      "tiny": 23
+    },
+    {
+      "url": "http://localhost:3000/contact",
+      "width": 320,
+      "role": "PUBLIC",
+      "ratio": 0.6571428571428571,
+      "total": 35,
+      "tiny": 23
+    },
+    {
+      "url": "http://localhost:3000/contact",
+      "width": 375,
+      "role": "PUBLIC",
+      "ratio": 0.6571428571428571,
+      "total": 35,
+      "tiny": 23
+    },
+    {
+      "url": "http://localhost:3000/contact",
+      "width": 414,
+      "role": "PUBLIC",
+      "ratio": 0.6571428571428571,
+      "total": 35,
+      "tiny": 23
+    },
+    {
+      "url": "http://localhost:3000/terms",
+      "width": 320,
+      "role": "PUBLIC",
+      "ratio": 0.65625,
+      "total": 32,
+      "tiny": 21
+    },
+    {
+      "url": "http://localhost:3000/terms",
+      "width": 375,
+      "role": "PUBLIC",
+      "ratio": 0.65625,
+      "total": 32,
+      "tiny": 21
+    },
+    {
+      "url": "http://localhost:3000/terms",
+      "width": 414,
+      "role": "PUBLIC",
+      "ratio": 0.65625,
+      "total": 32,
+      "tiny": 21
+    },
+    {
+      "url": "http://localhost:3000/privacy",
+      "width": 320,
+      "role": "PUBLIC",
+      "ratio": 0.65625,
+      "total": 32,
+      "tiny": 21
+    },
+    {
+      "url": "http://localhost:3000/privacy",
+      "width": 375,
+      "role": "PUBLIC",
+      "ratio": 0.65625,
+      "total": 32,
+      "tiny": 21
+    },
+    {
+      "url": "http://localhost:3000/privacy",
+      "width": 414,
+      "role": "PUBLIC",
+      "ratio": 0.65625,
+      "total": 32,
+      "tiny": 21
+    },
+    {
+      "url": "http://localhost:3000/offers",
+      "width": 320,
+      "role": "PUBLIC",
+      "ratio": 0.65625,
+      "total": 32,
+      "tiny": 21
+    },
+    {
+      "url": "http://localhost:3000/offers",
+      "width": 375,
+      "role": "PUBLIC",
+      "ratio": 0.65625,
+      "total": 32,
+      "tiny": 21
+    },
+    {
+      "url": "http://localhost:3000/offers",
+      "width": 414,
+      "role": "PUBLIC",
+      "ratio": 0.65625,
+      "total": 32,
+      "tiny": 21
+    },
+    {
+      "url": "http://localhost:3000/safety",
+      "width": 320,
+      "role": "PUBLIC",
+      "ratio": 0.6666666666666666,
+      "total": 33,
+      "tiny": 22
+    },
+    {
+      "url": "http://localhost:3000/safety",
+      "width": 375,
+      "role": "PUBLIC",
+      "ratio": 0.6666666666666666,
+      "total": 33,
+      "tiny": 22
+    },
+    {
+      "url": "http://localhost:3000/safety",
+      "width": 414,
+      "role": "PUBLIC",
+      "ratio": 0.6666666666666666,
+      "total": 33,
+      "tiny": 22
+    },
+    {
+      "url": "http://localhost:3000/login",
+      "width": 320,
+      "role": "PUBLIC",
+      "ratio": 0.6,
+      "total": 5,
+      "tiny": 3
+    },
+    {
+      "url": "http://localhost:3000/login",
+      "width": 375,
+      "role": "PUBLIC",
+      "ratio": 0.6,
+      "total": 5,
+      "tiny": 3
+    },
+    {
+      "url": "http://localhost:3000/login",
+      "width": 414,
+      "role": "PUBLIC",
+      "ratio": 0.6,
+      "total": 5,
+      "tiny": 3
+    },
+    {
+      "url": "http://localhost:3000/register",
+      "width": 320,
+      "role": "PUBLIC",
+      "ratio": 0.6,
+      "total": 5,
+      "tiny": 3
+    },
+    {
+      "url": "http://localhost:3000/register",
+      "width": 375,
+      "role": "PUBLIC",
+      "ratio": 0.6,
+      "total": 5,
+      "tiny": 3
+    },
+    {
+      "url": "http://localhost:3000/register",
+      "width": 414,
+      "role": "PUBLIC",
+      "ratio": 0.6,
+      "total": 5,
+      "tiny": 3
+    },
+    {
+      "url": "http://localhost:3000/forgot-password",
+      "width": 320,
+      "role": "PUBLIC",
+      "ratio": 0.5,
+      "total": 2,
+      "tiny": 1
+    },
+    {
+      "url": "http://localhost:3000/forgot-password",
+      "width": 375,
+      "role": "PUBLIC",
+      "ratio": 0.5,
+      "total": 2,
+      "tiny": 1
+    },
+    {
+      "url": "http://localhost:3000/forgot-password",
+      "width": 414,
+      "role": "PUBLIC",
+      "ratio": 0.5,
+      "total": 2,
+      "tiny": 1
+    },
+    {
+      "url": "http://localhost:3000/dishes",
+      "width": 320,
+      "role": "PUBLIC",
+      "ratio": 0.5,
+      "total": 42,
+      "tiny": 21
+    },
+    {
+      "url": "http://localhost:3000/dishes",
+      "width": 375,
+      "role": "PUBLIC",
+      "ratio": 0.31343283582089554,
+      "total": 67,
+      "tiny": 21
+    },
+    {
+      "url": "http://localhost:3000/dishes",
+      "width": 414,
+      "role": "PUBLIC",
+      "ratio": 0.31343283582089554,
+      "total": 67,
+      "tiny": 21
+    },
+    {
+      "url": "http://localhost:3000/search?q=rice",
+      "width": 320,
+      "role": "PUBLIC",
+      "ratio": 0.6666666666666666,
+      "total": 33,
+      "tiny": 22
+    },
+    {
+      "url": "http://localhost:3000/search?q=rice",
+      "width": 375,
+      "role": "PUBLIC",
+      "ratio": 0.6285714285714286,
+      "total": 35,
+      "tiny": 22
+    },
+    {
+      "url": "http://localhost:3000/search?q=rice",
+      "width": 414,
+      "role": "PUBLIC",
+      "ratio": 0.6285714285714286,
+      "total": 35,
+      "tiny": 22
+    }
+  ],
+  "clippedText": [
+    {
+      "url": "http://localhost:3000/rider/earnings",
+      "width": 320,
+      "role": "RIDER",
+      "count": 12,
+      "samples": [
+        {
+          "tag": "button",
+          "text": "",
+          "classList": "flex h-10 w-10 items-center justify-center rounded-xl text-ink hover:bg-surface-",
+          "scrollW": 50,
+          "clientW": 40
+        },
+        {
+          "tag": "span",
+          "text": "Deliveries",
+          "classList": "text-[11px] font-semibold uppercase tracking-wide text-ink-muted",
+          "scrollW": 64,
+          "clientW": 13
+        },
+        {
+          "tag": "span",
+          "text": "completed today",
+          "classList": "text-[11px] font-normal text-ink-muted",
+          "scrollW": 52,
+          "clientW": 13
+        },
+        {
+          "tag": "span",
+          "text": "Hours Online",
+          "classList": "text-[11px] font-semibold uppercase tracking-wide text-ink-muted",
+          "scrollW": 42,
+          "clientW": 13
+        },
+        {
+          "tag": "span",
+          "text": "—",
+          "classList": "font-display text-[18px] font-extrabold text-ink",
+          "scrollW": 16,
+          "clientW": 13
+        },
+        {
+          "tag": "span",
+          "text": "since morning",
+          "classList": "text-[11px] font-normal text-ink-muted",
+          "scrollW": 41,
+          "clientW": 13
+        }
+      ]
+    }
+  ],
+  "overlaps": [],
+  "fixedEscape": []
+}

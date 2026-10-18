@@ -1,0 +1,1464 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["partialIndexes"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model DeliveryFeeConfig {
+  id                String   @id @default(cuid())
+  /// Flat Taka charged before any "included kilometres" or
+  /// per-km adders. Snapped onto every order.
+  baseFee           Int
+  /// The first `includedKm` kilometres are charged only the
+  /// baseFee. Kilometres above this add `perKmRate` each.
+  includedKm        Float
+  /// Taka per kilometre beyond `includedKm`. Rounded to the
+  /// nearest integer when the formula lands.
+  perKmRate         Int
+  /// Hard minimum on the final fee (after the clamp). Orders
+  /// shorter than `includedKm` still pay at least this.
+  minFee            Int
+  /// Hard cap on the final fee.
+  maxFee            Int
+  /// Slice of the final fee that goes to the rider. 0-100.
+  /// Default 70 matches the legacy formula `deliveryFee × 0.7`.
+  riderSharePercent Int
+  /// Tracks who last edited the row (audit).
+  updatedByUserId   String?
+  updatedAt         DateTime @updatedAt
+  createdAt         DateTime @default(now())
+  /// Active row flag. Only one row should carry `isActive = true`
+  /// at any given moment; the admin route flips this atomically.
+  isActive          Boolean  @default(true)
+  updatedByUser     User?    @relation("DeliveryConfigEditor", fields: [updatedByUserId], references: [id])
+
+  @@index([isActive])
+}
+
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model User {
+  id                            String                 @id @default(cuid())
+  name                          String
+  email                         String                 @unique
+  password                      String
+  /// Phone is OPTIONAL on the schema but UNIQUE when set. The
+  /// registration API surface 409 on duplicate so a customer
+  /// can't accidentally inherit another user's phone-bound history.
+  phone                         String?                @unique
+  role                          UserRole               @default(CUSTOMER)
+  createdAt                     DateTime               @default(now())
+  notifyOrderUpdates            Boolean?               @default(true)
+  notifyPromotions              Boolean?               @default(true)
+  notifyNewsletter              Boolean?               @default(true)
+  /// Soft-delete marker. When set, every list / "me" query skips
+  /// this row. Hard-deletes are reserved for GDPR / account-erasure
+  /// flows that explicitly bypass this filter.
+  deletedAt                     DateTime?
+  /// Admin-driven "ban" flag. When true, `/api/auth/login` returns
+  /// 403 even if the password matches. Independent of `deletedAt`
+  /// because the row stays around so admins can later unsuspend
+  /// without losing the account history.
+  isSuspended                   Boolean                @default(false)
+  /// Set true after the rider's PROFILE_INFO change request is
+  /// approved. While true, PATCH /api/riders/me accepts writes to
+  /// name/email/phone and clears the flag on success.
+  profileNeedsReentry           Boolean                @default(false)
+  /// Feat 6 — Customer Referral Program. 6–8 character
+  /// alphanumeric code assigned at registration (idempotent
+  /// backfill for legacy users in scripts/backfill-referral-codes.ts).
+  /// UNIQUE so the registration API can look up the referrer by
+  /// code; collisions during generate are handled by retrying
+  /// inside `lib/referral.ts`.
+  referralCode                  String?                @unique
+  /// Self-relation: who referred this user (the user that owns the
+  /// referralCode they typed in at signup). Nullable because
+  /// most users sign up without a code. SetNull on the referrer's
+  /// hard-delete so we never silently lose a chain of attribution
+  /// — a deleted referrer still has the row, just without a
+  /// forward link from this user.
+  referredByUserId              String?
+  referredBy                    User?                  @relation("UserReferrals", fields: [referredByUserId], references: [id], onDelete: SetNull)
+  /// Inverse of `referredBy` — every user this person has
+  /// referred (their downstream "downline"). Same named
+  /// relation on both sides so Prisma can resolve the join.
+  usersReferred                 User[]                 @relation("UserReferrals")
+  referralsMade                 Referral[]             @relation("ReferrerReferrals")
+  refereeReferrals              Referral[]             @relation("RefereeReferral")
+  addresses                     Address[]
+  auditEvents                   AuditLog[]
+  customerProfile               CustomerProfile?
+  deliveryConfigsEdited         DeliveryFeeConfig[]    @relation("DeliveryConfigEditor")
+  favorites                     Favorite[]
+  notifications                 Notification[]
+  customerOrders                Order[]                @relation("CustomerOrders")
+  riderOrders                   Order[]                @relation("RiderOrders")
+  partnerProfile                PartnerProfile?
+  ownedRestaurants              Restaurant[]           @relation("RestaurantOwner")
+  verifiedRestaurants           Restaurant[]           @relation("RestaurantVerifiedBy")
+  customerReviews               Review[]               @relation("CustomerReviews")
+  riderReviews                  Review[]               @relation("RiderReviews")
+  riderProfile                  RiderProfile?
+  verifiedRiders                RiderProfile[]         @relation("RiderVerifiedBy")
+  savedPaymentMethods           SavedPaymentMethod[]
+  /// Feat 5 — withdrawal requests this user filed (customer side).
+  withdrawalRequests            WithdrawalRequest[]
+  /// Feat 5 — reverse relation: every WithdrawalRequest.reviewedByAdminId
+  /// back-reference. Uses a named relation so the inverse is explicit.
+  reviewedWithdrawals           WithdrawalRequest[]    @relation("AdminReviewedWithdrawals")
+  /// Profile-change requests filed by this user (rider "Contact
+  /// support" flow). Forward + reverse both declared so Prisma can
+  /// resolve the join without ambiguity when we eventually add a
+  /// partner equivalent.
+  profileChangeRequests         ProfileChangeRequest[] @relation("PcrUser")
+  /// Reverse relation: every ProfileChangeRequest.reviewedByAdminId
+  /// pointing back to the admin user who actioned it.
+  reviewedProfileChangeRequests ProfileChangeRequest[] @relation("PcrReviewer")
+  /// Feat 2 — order chat messages this user sent (as customer or
+  /// assigned rider).
+  orderMessages                 OrderMessage[]
+
+  @@index([role])
+  @@index([deletedAt], where: raw("(\"deletedAt\" IS NULL)"))
+  @@index([referredByUserId])
+}
+
+/// Feat 6 — Customer Referral Program edge. One row per
+/// (referrer, referee) pair. Status lifecycle:
+///
+///   • PENDING    — created at registration when a new user
+///                  types a valid referral code. No money has
+///                  moved yet.
+///   • REWARDED   — the referee's first order was delivered.
+///                  Both wallets were credited ৳50 and a
+///                  notification was fired.
+///
+/// A second order doesn't create a second row; the `refereeUserId`
+/// is UNIQUE so the same user can never be "double-referred" by
+/// the same code (or by two different codes — once you joined,
+/// the link is locked in).
+model Referral {
+  id             String         @id @default(cuid())
+  referrerUserId String
+  /// UNIQUE so a single user can only have one referrer ever.
+  /// (We never expect to need to "switch" a user's referrer —
+  /// their first signup wins, even if a friend invites them
+  /// later from a different channel.)
+  refereeUserId  String         @unique
+  status         ReferralStatus @default(PENDING)
+  /// Set when the system transitions PENDING → REWARDED.
+  /// Nullable because the row spends most of its life in
+  /// PENDING.
+  rewardedAt     DateTime?
+  createdAt      DateTime       @default(now())
+
+  referrer User @relation("ReferrerReferrals", fields: [referrerUserId], references: [id], onDelete: Cascade)
+  referee  User @relation("RefereeReferral", fields: [refereeUserId], references: [id], onDelete: Cascade)
+
+  @@index([referrerUserId, status])
+  @@index([status])
+}
+
+/// One-to-one customer profile. Created at registration.
+model CustomerProfile {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  /// Free-form preference the customer can store ("Vegetarian",
+  /// "Halal only", etc). Optional.
+  defaultPreference String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Feat 3 — one-to-one wallet (auto-created on first refund or
+  /// signup).
+  wallet            Wallet?
+}
+
+/// A customer's saved delivery address.
+model Address {
+  id          String       @id @default(cuid())
+  userId      String
+  label       AddressLabel @default(HOME)
+  fullAddress String
+  city        String
+  area        String?
+  isDefault   Boolean      @default(false)
+  createdAt   DateTime     @default(now())
+  latitude    Float?
+  longitude   Float?
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// A customer's saved wallet/card/cash entry. PAN / phone number
+/// is stored masked (last 4 only).
+model SavedPaymentMethod {
+  id            String           @id @default(cuid())
+  userId        String
+  type          SavedPaymentKind
+  /// Masked account number — e.g. "•••• •••• •••• 4321".
+  accountNumber String
+  isDefault     Boolean          @default(false)
+  createdAt     DateTime         @default(now())
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// A customer's saved restaurant (heart icon).
+model Favorite {
+  id           String     @id @default(cuid())
+  userId       String
+  restaurantId String
+  createdAt    DateTime   @default(now())
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, restaurantId])
+  @@index([userId])
+  @@index([restaurantId])
+}
+
+/// One-to-one partner profile. Created at registration.
+model PartnerProfile {
+  id              String                  @id @default(cuid())
+  userId          String                  @unique
+  /// Free-form business tagline / description ("Family-run for 12
+  /// years"). Optional.
+  bio             String?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  paymentAccounts PartnerPaymentAccount[]
+  user            User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  restaurants     Restaurant[]
+}
+
+/// A partner-owned storefront.
+model Restaurant {
+  id                    String                    @id @default(cuid())
+  name                  String
+  ownerId               String
+  address               String
+  cuisine               String
+  rating                Float                     @default(0)
+  deliveryTime          Int
+  /// Deprecated — the platform owns the delivery-fee schedule via
+  /// `DeliveryFeeConfig`. Stored on the row so historical orders
+  /// keep their snapshot value; new orders should look at
+  /// `Order.deliveryFee` (which itself is computed server-side at
+  /// create time). Do not use this column to set a new value.
+  deliveryFee           Int
+  coverImage            String?
+  createdAt             DateTime                  @default(now())
+  /// "10:00 AM – 11:00 PM" — free-form.
+  openingHours          String                    @default("")
+  /// Restaurant pin captured by the partner's map picker.
+  latitude              Float?
+  longitude             Float?
+  /// Optional FK to the PartnerProfile that owns this restaurant.
+  /// Set on create; lets us join the restaurant back to its
+  /// payment-account list without going through the User row.
+  partnerProfileId      String?
+  /// Soft-delete marker. DELETE /api/restaurants/[id] sets this
+  /// instead of removing the row, preserving history and any audit
+  /// trails that still reference the restaurant id.
+  deletedAt             DateTime?
+  /// Admin-driven "deactivate" flag. When true, the public restaurant
+  /// listing (`/api/restaurants`) hides this row the same way a
+  /// soft-delete does — but the partner owner can still see and edit
+  /// their own restaurant from the partner dashboard so they know
+  /// they were suspended. Toggled from `/admin/restaurants`.
+  isSuspended           Boolean                   @default(false)
+  /// কাজ ২ — Partner-facing "Accepting Orders" toggle. Defaults to
+  /// true so a freshly-created restaurant starts open and accepts
+  /// orders; partner flips it off via `POST /api/restaurants/status`
+  /// (offline hours, cleaning, stock-out). The customer detail page
+  /// surfaces "Currently Closed" when false and `POST /api/orders`
+  /// refuses to create orders against an offline restaurant.
+  isAcceptingOrders     Boolean                   @default(true)
+  /// ধাপ ৪ — Admin verification gate. A newly-created restaurant
+  /// starts PENDING and is INVISIBLE to every customer-facing
+  /// endpoint (homepage, listing, search, trending). Approved
+  /// restaurants flip to APPROVED; rejected ones carry an
+  /// `rejectionReason` and the partner can re-submit.
+  verificationStatus    VerificationStatus        @default(PENDING)
+  /// ID of the admin who approved/rejected the restaurant. Null
+  /// while still PENDING or never reviewed.
+  verifiedByAdminId     String?
+  /// Timestamp of the most recent approve/reject decision.
+  verifiedAt            DateTime?
+  /// Optional human-readable note shown on the partner dashboard
+  /// when an admin rejects the application.
+  rejectionReason       String?
+  favorites             Favorite[]
+  menu                  MenuItem[]
+  /// কাজ ২ — partner "Contact support" re-entry gates. Set to true
+  /// when an admin APPROVES a partner-side ProfileChangeRequest; the
+  /// Settings page then re-enables the matching field group until
+  /// the partner saves fresh values. Cleared by PATCH
+  /// /api/restaurants/[id] for the matching field set.
+  profileNeedsReentry   Boolean                   @default(false)
+  locationNeedsReentry  Boolean                   @default(false)
+  /// Reverse relation for ProfileChangeRequest.restaurantId. Named so
+  /// the future reverse is unambiguous.
+  profileChangeRequests ProfileChangeRequest[]
+  orders                Order[]
+  paymentAccounts       PartnerPaymentAccount[]
+  payouts               Payout[]
+  promoCodes            PromoCode[]
+  owner                 User                      @relation("RestaurantOwner", fields: [ownerId], references: [id])
+  partnerProfile        PartnerProfile?           @relation(fields: [partnerProfileId], references: [id])
+  verifiedByAdmin       User?                     @relation("RestaurantVerifiedBy", fields: [verifiedByAdminId], references: [id])
+  documents             RestaurantDocument[]
+  onlineSessions        RestaurantOnlineSession[]
+  reviews               Review[]
+
+  @@index([ownerId])
+  @@index([partnerProfileId])
+  @@index([cuisine])
+  @@index([verificationStatus])
+  @@index([deletedAt], where: raw("(\"deletedAt\" IS NULL)"))
+}
+
+/// কাজ ২ — Mirror of `RiderOnlineSession` but scoped to a
+/// restaurant. A row exists for each interval where the partner
+/// has flipped the "Accepting Orders" toggle ON. `endedAt = null`
+/// means the current session is still open.
+///
+/// Unlike the rider session we deliberately do NOT heartbeat
+/// here — restaurants don't move, so a stale session is much less
+/// dangerous (a forgotten open session only inflates the partner's
+/// own hours counter). The partner closes it explicitly by
+/// flipping the toggle off.
+model RestaurantOnlineSession {
+  id           String     @id @default(cuid())
+  restaurantId String
+  startedAt    DateTime
+  /// Same as the rider session — kept so a future heartbeat can
+  /// distinguish "online, idle" from "offline, didn't bother
+  /// closing". Currently always equal to `startedAt` (no heartbeat).
+  lastSeenAt   DateTime
+  /// NULL while the session is open; stamped when the partner
+  /// toggles offline.
+  endedAt      DateTime?
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId])
+  @@index([startedAt])
+}
+
+/// A single dish on a restaurant's menu.
+model MenuItem {
+  id           String           @id @default(cuid())
+  restaurantId String
+  name         String
+  price        Int
+  /// Free-form so partners can introduce their own categories.
+  category     String
+  image        String?
+  description  String?
+  available    Boolean          @default(true)
+  createdAt    DateTime         @default(now())
+  popular      Boolean          @default(false)
+  /// Soft-delete marker. DELETE /api/menu-items/[id] sets this
+  /// instead of removing the row, so past OrderItem snapshots keep
+  /// their menuItem reference intact (the OrderItem.menuItem FK is
+  /// `onDelete: Restrict`, so we *couldn't* hard-delete a menu item
+  /// that any historical order references anyway).
+  deletedAt    DateTime?
+  restaurant   Restaurant       @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  orderItems   OrderItem[]
+  /// Feat 1 — option groups attached to this item (e.g. "Size",
+  /// "Extra Toppings"). Cascade-delete so removing a MenuItem
+  /// cleans up its customisation UI without orphan rows.
+  options      MenuItemOption[]
+
+  @@index([restaurantId])
+  @@index([category])
+  @@index([restaurantId, available])
+  @@index([deletedAt], where: raw("(\"deletedAt\" IS NULL)"))
+}
+
+/// Feat 1 — Customisation / Add-ons for menu items.
+///
+/// A MenuItem can have zero or more `MenuItemOption` groups (e.g.
+/// "Size", "Extra Toppings"). Each group has many
+/// `MenuItemOptionChoice` entries (the concrete options the
+/// customer picks from — "Large", "Extra Cheese", etc.).
+///
+/// `type` controls UI selection mode:
+///   • SINGLE_CHOICE — radio buttons, exactly one selection.
+///   • MULTI_CHOICE  — checkboxes, zero or more selections.
+///
+/// `required` is enforced server-side at order-create time: a
+/// required group must have at least one choice in
+/// `OrderItem.selectedOptions` or the order is rejected.
+///
+/// `priceDelta` is in ৳ (integer); can be negative (discounts —
+/// "Small — ৳20 off"). The order route validates the
+/// client-submitted option ids exist on this item AND recomputes
+/// the line price from the server-side `priceDelta`, never
+/// trusting the client's price payload.
+model MenuItemOption {
+  id         String                 @id @default(cuid())
+  menuItemId String
+  name       String
+  /// UI selection mode — radio (SINGLE) or checkbox (MULTI).
+  type       MenuItemOptionType     @default(SINGLE_CHOICE)
+  /// If true, the customer must pick at least one choice from
+  /// this group at order-create time. Server-enforced.
+  required   Boolean                @default(false)
+  /// Display order within the menu item. Ties are broken by id.
+  sortOrder  Int                    @default(0)
+  createdAt  DateTime               @default(now())
+  menuItem   MenuItem               @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  choices    MenuItemOptionChoice[]
+
+  @@index([menuItemId])
+}
+
+/// Feat 1 — One concrete option within a group ("Large", "Extra
+/// Cheese", "Small — ৳20 off"). `priceDelta` is in ৳, signed — the
+/// order route sums every selected choice's priceDelta to
+/// recompute the OrderItem.price server-side.
+model MenuItemOptionChoice {
+  id         String         @id @default(cuid())
+  optionId   String
+  label      String
+  /// Signed integer in ৳. Positive = surcharge, negative =
+  /// discount. Default 0 so options with no price change don't
+  /// have to set a value.
+  priceDelta Int            @default(0)
+  /// Display order within the group. Ties broken by id.
+  sortOrder  Int            @default(0)
+  createdAt  DateTime       @default(now())
+  option     MenuItemOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+
+  @@index([optionId])
+}
+
+/// Feat 1 — How the customer picks from a `MenuItemOption` group.
+/// SINGLE = radio, MULTI = checkbox. The order route enforces
+/// exactly-one vs. zero-or-more in the API validation layer.
+enum MenuItemOptionType {
+  SINGLE_CHOICE
+  MULTI_CHOICE
+}
+
+/// A payment destination the partner has pre-registered in their
+/// Settings page (bKash / Nagad / Rocket / Card). The Earnings
+/// "Request Payout" form picks one of these — partners no longer
+/// type a destination at payout time.
+model PartnerPaymentAccount {
+  id               String         @id @default(cuid())
+  partnerProfileId String
+  /// Back-reference to the Restaurant so a payout can be issued
+  /// against any restaurant the partner owns. Nullable to allow
+  /// accounts added before the restaurant was created.
+  restaurantId     String?
+  /// Human-friendly nickname ("Main bKash", "Backup Card"). Used by
+  /// the dropdown in the payout form.
+  label            String
+  method           PayoutMethod
+  /// Phone number for wallets; last 4 digits for cards.
+  destination      String
+  /// Account holder name. Stored plaintext because we never have to
+  /// re-display it elsewhere (the partner entered it once).
+  accountHolder    String
+  isDefault        Boolean        @default(false)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  partnerProfile   PartnerProfile @relation(fields: [partnerProfileId], references: [id], onDelete: Cascade)
+  restaurant       Restaurant?    @relation(fields: [restaurantId], references: [id])
+  payouts          Payout[]
+
+  @@index([partnerProfileId])
+  @@index([restaurantId])
+}
+
+/// A partner/rider withdrawal request against their available
+/// balance. Append-only ledger: each row captures a single request,
+/// the destination it was made to, and the lifecycle status.
+///
+/// `amount` is in Taka (Int) like the rest of the monetary columns.
+/// Available balance = sum(DELIVERED Order.total) for the
+/// restaurant − sum(non-FAILED Payout.amount) for the restaurant.
+model Payout {
+  id                      String                 @id @default(cuid())
+  /// For PARTNER payouts: the restaurant the balance came from.
+  /// Nullable because we keep this generic across partner + rider.
+  restaurantId            String?
+  amount                  Int
+  method                  PayoutMethod
+  destination             String
+  note                    String?
+  status                  PayoutStatus           @default(PENDING)
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
+  /// Optional FK to the saved PartnerPaymentAccount /
+  /// RiderPaymentAccount the partner/rider picked from the
+  /// dropdown. Nullable so the column is forward-compatible with
+  /// manually-typed destinations.
+  partnerPaymentAccountId String?
+  riderPaymentAccountId   String?
+  /// For RIDER payouts: the rider profile the payout was issued to.
+  /// Nullable so the same table can serve both domains.
+  riderProfileId          String?
+  partnerPaymentAccount   PartnerPaymentAccount? @relation(fields: [partnerPaymentAccountId], references: [id])
+  restaurant              Restaurant?            @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  riderPaymentAccount     RiderPaymentAccount?   @relation(fields: [riderPaymentAccountId], references: [id])
+  riderProfile            RiderProfile?          @relation(fields: [riderProfileId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId])
+  @@index([riderProfileId])
+  @@index([status])
+}
+
+/**
+ * --------------------------------------------------------------------------
+ */
+/**
+ * Feat 5 — Unified customer-side withdrawal requests
+ */
+/**
+ * --------------------------------------------------------------------------
+ */
+
+/// A customer request to withdraw wallet balance to a payout
+/// method. Distinct from `Payout` (which serves partner + rider
+/// earnings) so the admin view at /admin/withdrawals can render
+/// all three roles in one place with role-based tabs/filter.
+///
+/// `payoutMethod` mirrors `PayoutMethod` but is declared as a
+/// string instead of an enum so the same column can carry legacy
+/// `BKASH` / `NAGAD` / `ROCKET` / `CARD` values without forcing a
+/// schema migration. The server-side validator restricts the
+/// allowed strings.
+model WithdrawalRequest {
+  id                String                  @id @default(cuid())
+  userId            String
+  /// CUSTOMER (future-proof — partner/rider withdrawal flow can keep
+  /// using the existing `Payout` table).
+  role              WithdrawalRequestRole
+  amount            Int
+  /// "WALLET" — only the customer wallet feeds this flow today.
+  /// Forward-compatible with other sources later.
+  sourceType        WithdrawalSourceType
+  payoutMethod      String
+  payoutDestination String
+  status            WithdrawalRequestStatus @default(PENDING)
+  reviewedByAdminId String?
+  reviewedAt        DateTime?
+  rejectionReason   String?
+  updatedAt         DateTime                @updatedAt
+  createdAt         DateTime                @default(now())
+  user              User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reviewedByAdmin   User?                   @relation("AdminReviewedWithdrawals", fields: [reviewedByAdminId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([status, createdAt])
+  @@index([role, status])
+}
+
+enum WithdrawalRequestRole {
+  CUSTOMER
+}
+
+enum WithdrawalSourceType {
+  WALLET
+}
+
+enum WithdrawalRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/**
+ * --------------------------------------------------------------------------
+ */
+/**
+ * Profile-change requests
+ */
+/**
+ * --------------------------------------------------------------------------
+ */
+
+/// Who filed the request. Snapshot at submission time so the admin
+/// queue keeps working even if the user later switches roles
+/// (CUSTOMER ↔ PARTNER ↔ RIDER). PARTNER uses the same table for
+/// "Contact support" requests on the restaurant profile + location.
+enum ProfileChangeRequestRole {
+  RIDER
+  PARTNER
+}
+
+/// Which field-group the requester wants to unlock.
+///   • RIDER  → PROFILE_INFO (name/email/phone), VEHICLE_INFO
+///   • PARTNER → RESTAURANT_PROFILE (name/cuisine/cover),
+///                RESTAURANT_LOCATION (map pin + address text)
+/// On APPROVE the matching fields on the source profile are wiped
+/// so the user can re-enter them via the Settings page.
+enum ProfileChangeRequestType {
+  PROFILE_INFO
+  VEHICLE_INFO
+  RESTAURANT_PROFILE
+  RESTAURANT_LOCATION
+}
+
+enum ProfileChangeRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// A single "Contact support" / "Reach out to support" request from
+/// a rider. Only one PENDING request per (userId, requestType) is
+/// allowed at a time — enforced in the POST route, not via DB unique
+/// index, so a rejected request can stay in history while the rider
+/// opens a new one.
+///
+/// On APPROVE the matching fields on the source profile are wiped
+/// (so the rider can re-enter them via the Settings page). On
+/// REJECT the row stays so the rider sees a "rejected" status on
+/// the Settings page.
+model ProfileChangeRequest {
+  id                String                     @id @default(cuid())
+  userId            String
+  /// Snapshot of the requester's role at submission time.
+  role              ProfileChangeRequestRole
+  requestType       ProfileChangeRequestType
+  /// Optional short note from the rider explaining the change.
+  /// Trimmed + length-capped server-side (1000 chars).
+  note              String?
+  status            ProfileChangeRequestStatus @default(PENDING)
+  /// Admin who approved / rejected. Null until the row is actioned.
+  reviewedByAdminId String?
+  /// Timestamp the admin took the action. Null while PENDING.
+  reviewedAt        DateTime?
+  /// Admin's note on a REJECT (required on REJECT, optional on
+  /// APPROVE).
+  adminNote         String?
+  createdAt         DateTime                   @default(now())
+  /// Updated automatically when the row mutates. Not user-facing.
+  updatedAt         DateTime                   @updatedAt
+  /// Optional — set when `role = PARTNER`. A partner may own multiple
+  /// restaurants so we can't derive it from `userId`. Null for RIDER
+  /// rows. FK is nullable + onDelete: Cascade to clean up if the
+  /// restaurant goes away.
+  restaurantId      String?
+
+  user            User        @relation("PcrUser", fields: [userId], references: [id], onDelete: Cascade)
+  reviewedByAdmin User?       @relation("PcrReviewer", fields: [reviewedByAdminId], references: [id], onDelete: SetNull)
+  restaurant      Restaurant? @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  /// Hot read path: the admin queue filters by (status, requestType,
+  /// createdAt) so this composite covers the WHERE clause directly.
+  @@index([status, requestType, createdAt])
+  /// Per-user lookup so the Settings page can render "request
+  /// pending review" with a single query.
+  @@index([userId, requestType, status])
+  /// Restaurant lookup for the partner dashboard (latest pending /
+  /// rejected per restaurant).
+  @@index([restaurantId, requestType, status])
+}
+
+/// One-to-one rider profile. Created at registration.
+model RiderProfile {
+  id                  String                @id @default(cuid())
+  userId              String                @unique
+  /// Vehicle the rider registered with. Read-only after signup
+  /// (changes require support re-verification).
+  vehicleType         String?
+  /// Vehicle registration / licence plate, read-only post-signup.
+  vehicleRegNumber    String?
+  /// Set true after the rider's VEHICLE_INFO change request is
+  /// approved. While true, PATCH /api/riders/me accepts writes to
+  /// vehicleType / vehicleRegNumber and clears the flag on success.
+  vehicleNeedsReentry Boolean               @default(false)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  /// Live-rider tracking fields. Updated every 10-15s by the rider
+  /// dashboard when the rider toggles "Online" + grants geolocation.
+  /// Customer order tracking reads these to draw the live pin.
+  currentLat          Float?
+  currentLng          Float?
+  lastLocationUpdate  DateTime?
+  /// True when the rider is taking deliveries. Toggled via
+  /// POST /api/riders/status (NOT a transient React flag) so the
+  /// dashboard reflects the correct state after a page refresh.
+  /// Defaults to false so newly-registered riders don't
+  /// accidentally show as "available".
+  isOnline            Boolean               @default(false)
+  zoneAddress         String?
+  /// Service zone — the rider's chosen 5-km radius work area.
+  /// NULL means the rider hasn't picked a zone yet; the dashboard
+  /// blocks them with a modal until they do. `zoneRadiusKm` is a
+  /// Float to leave room for future tier-specific defaults, but
+  /// the platform currently standardises everyone on 5.
+  zoneLat             Float?
+  zoneLng             Float?
+  zoneRadiusKm        Float?                @default(5)
+  /// Rider-side notification preferences. All editable from
+  /// /rider/settings (Rider Notifications section). Defaults match
+  /// what the migration carries for legacy rows: opt-out (false)
+  /// for the weekly summary because we don't yet send one, and
+  /// opt-in (true) for the offer/payout bell alerts so a fresh
+  /// rider doesn't miss incoming work.
+  ///
+  /// • `notifyNewRequest`     — bell alert when a delivery offer
+  /// arrives. The dispatch + offer card + countdown all keep
+  /// working regardless — turning this off only suppresses the
+  /// in-app notification row.
+  /// • `notifyPayout`         — bell alert when a payout status
+  /// changes (PENDING → COMPLETED / FAILED).
+  /// • `notifyWeeklySummary`  — weekly summary email. Reserved
+  /// for a future email pipeline — currently the toggle is
+  /// visible so riders can record their intent, and the row
+  /// sits idle until that pipeline exists.
+  notifyNewRequest    Boolean               @default(true)
+  notifyPayout        Boolean               @default(true)
+  notifyWeeklySummary Boolean               @default(false)
+  /// ধাপ ৫ — Admin verification gate. Newly-registered riders
+  /// start PENDING and cannot pick up deliveries until an admin
+  /// approves their documents. Approved → APPROVED; rejected
+  /// carries an inline `rejectionReason` the rider sees in
+  /// the dashboard.
+  verificationStatus  VerificationStatus    @default(PENDING)
+  /// ID of the admin who approved/rejected the rider. Null while
+  /// still PENDING or never reviewed.
+  verifiedByAdminId   String?
+  /// Timestamp of the most recent approve/reject decision.
+  verifiedAt          DateTime?
+  /// Optional human-readable note shown on the rider dashboard
+  /// when an admin rejects the application.
+  rejectionReason     String?
+  payouts             Payout[]
+  documents           RiderDocument[]
+  onlineSessions      RiderOnlineSession[]
+  paymentAccounts     RiderPaymentAccount[]
+  user                User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  verifiedByAdmin     User?                 @relation("RiderVerifiedBy", fields: [verifiedByAdminId], references: [id])
+
+  @@index([verificationStatus])
+}
+
+/// One continuous "online" interval for a rider.
+///
+/// • `startedAt` = when the rider toggled online (or the
+/// latest heartbeat before a stale close).
+/// • `lastSeenAt` = the freshest heartbeat we've seen on this
+/// session. Lets the dashboard show a live idle timer and
+/// lets `isEffectivelyOnline` decide who is currently online
+/// (an open session with lastSeenAt older than 2 minutes is
+/// treated as offline).
+/// • `endedAt` = null while the rider is still online; set when
+/// they toggle offline or a lazy stale-close runs.
+///
+/// Sessions split across the midnight boundary (Asia/Dhaka, the
+/// business timezone) when summed for hours reporting, so an
+/// overnight rider shows up correctly on both days' totals.
+model RiderOnlineSession {
+  id             String       @id @default(cuid())
+  riderProfileId String
+  startedAt      DateTime
+  lastSeenAt     DateTime
+  /// NULL while the session is open; non-null once closed (cleanly
+  /// via /api/riders/status, or lazily by
+  /// `closeStaleRiderOnlineSessions`).
+  endedAt        DateTime?
+  createdAt      DateTime     @default(now())
+  riderProfile   RiderProfile @relation(fields: [riderProfileId], references: [id], onDelete: Cascade)
+
+  @@index([riderProfileId, startedAt])
+}
+
+/// A payment destination the rider has pre-registered.
+model RiderPaymentAccount {
+  id             String       @id @default(cuid())
+  riderProfileId String
+  /// Human-friendly nickname ("Personal bKash", "Rocket for Friday").
+  label          String
+  method         PayoutMethod
+  /// Phone number for wallets; last 4 digits for cards.
+  destination    String
+  /// Account holder name.
+  accountHolder  String
+  isDefault      Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  payouts        Payout[]
+  riderProfile   RiderProfile @relation(fields: [riderProfileId], references: [id], onDelete: Cascade)
+
+  @@index([riderProfileId])
+}
+
+/// A customer's order.
+model Order {
+  id                    String               @id @default(cuid())
+  customerId            String
+  restaurantId          String
+  /// Nullable: an order is PENDING before a rider accepts it.
+  riderId               String?
+  status                OrderStatus          @default(PENDING)
+  subtotal              Int
+  deliveryFee           Int
+  tax                   Int                  @default(0)
+  total                 Int
+  deliveryAddress       String
+  paymentMethod         PaymentMethod        @default(CASH)
+  /// ধাপ ১ — SSLCommerz gateway state. Always starts NOT_INITIATED
+  /// for COD orders; flips to PENDING/PAID/FAILED/CANCELLED via the
+  /// /api/payments/sslcommerz/* callback routes. See the enum's
+  /// docstring for the full state machine.
+  paymentGatewayStatus  PaymentGatewayStatus @default(NOT_INITIATED)
+  /// Val-id / bank-transaction-id returned by SSLCommerz after a
+  /// successful validation. Set alongside PAID; useful for support
+  /// cross-reference.
+  gatewayTransactionId  String?
+  /// Timestamp the gateway confirmed payment (PAID). NULL on orders
+  /// that never reached the gateway (COD) or were paid before this
+  /// column existed.
+  paidAt                DateTime?
+  /// Session key from /sslcgwapi/v4/api.php init. Used to call
+  /// the order-validation endpoint if we ever need a server-side
+  /// re-check. Cleared once the payment PAID is recorded.
+  gatewaySessionKey     String?
+  createdAt             DateTime             @default(now())
+  /// Dispatch bookkeeping — JSON-encoded `{ riders: [...] }` of
+  /// rider ids that have been offered / declined / timed out on
+  /// this order. We use a JSON field instead of a String[] so future
+  /// dispatch metadata (rejection reason, timestamp) can be added
+  /// without another migration.
+  ///
+  /// Stored as a JSON document via the `Json` type so Prisma can
+  /// read/update it inline without our server reshaping it.
+  dispatchedRiders      Json?                @default("{\"riders\": []}")
+  /// Server-side timestamp when the current OFFERED_TO_RIDER rider's
+  /// response window expires. Dispatch uses this to compute "should
+  /// we re-dispatch now" lazily — there's no separate worker.
+  riderResponseDeadline DateTime?
+  /// Discount amount (Taka) applied via the promo code. Always <= subtotal.
+  discountAmount        Int                  @default(0)
+  /// Promo code the customer applied at checkout (or null). We store
+  /// the raw code, not the foreign key, so deleting a PromoCode row
+  /// later doesn't break old order history.
+  promoCode             String?
+  /// Customer's chosen delivery pin (from the AddressPicker or
+  /// homepage location pick). Used at checkout time to compute
+  /// the platform-config delivery fee via haversine against
+  /// the restaurant pin, then snapshotted so a future config
+  /// change doesn't rewrite historical orders.
+  deliveryLat           Float?
+  deliveryLng           Float?
+  /// Computed distance (km) restaurant → customer pin, rounded
+  /// to 3 decimals. Stores a snapshot of the formula inputs so
+  /// reports can show "average distance per delivery" later.
+  distanceKm            Float?
+  /// Rider earnings (integer Taka) — `deliveryFee × riderShare%`
+  /// at the moment of order create, snapshotted onto the row so
+  /// the earnings / payout pages always match what was originally
+  /// earned even if `DeliveryFeeConfig` is later edited.
+  riderEarning          Int?
+  /// Feat 2 — customer's free-text note at checkout (e.g. "Ring
+  /// the bell", "Leave at the door", "No onions please").
+  /// Optional, capped at 300 chars by the API. Rendered
+  /// highlighted on the partner Incoming Orders panel, the
+  /// Order Detail modal, and the rider delivery page.
+  specialInstructions   String?
+  customer              User                 @relation("CustomerOrders", fields: [customerId], references: [id])
+  restaurant            Restaurant           @relation(fields: [restaurantId], references: [id])
+  rider                 User?                @relation("RiderOrders", fields: [riderId], references: [id])
+  items                 OrderItem[]
+  reviews               Review[]
+  messages              OrderMessage[]
+  /// Feat 3+4 — wallet audit trail. Orders that triggered a
+  /// REFUND (partner cancel of a paid order) or TOKEN_EARNED (8%
+  /// cashback on DELIVERED) link back to the customer's wallet row.
+  walletTransactions    WalletTransaction[]
+
+  @@index([customerId])
+  @@index([restaurantId])
+  @@index([riderId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([restaurantId, status])
+  @@index([customerId, createdAt])
+  /// Hot path: Partner Orders query excludes unpaid gateway orders
+  /// (NOT_INITIATED / FAILED / CANCELLED). Index keeps the scan
+  /// cheap even when many ghost orders accumulate.
+  @@index([restaurantId, paymentGatewayStatus])
+}
+
+/// Line items on an Order. Snapshot unit price at order time.
+model OrderItem {
+  id              String   @id @default(cuid())
+  orderId         String
+  menuItemId      String
+  quantity        Int
+  price           Int
+  /// Feat 1 — snapshot of the option groups + choices the customer
+  /// selected at order-create time. Nullable so legacy rows stay
+  /// valid. Shape:
+  ///   { options: Array<{
+  ///       optionId: string,
+  ///       choiceIds: string[],
+  ///       name: string,           // denormalised so historical
+  ///       choiceLabels: string[], // orders survive option edits
+  ///       priceDelta: number,     // ৳, signed
+  ///     }> }
+  /// The server always recomputes `price` from
+  /// `menuItem.price + sum(priceDelta)`; this field is purely
+  /// a display payload for the partner / rider / tracking page.
+  selectedOptions Json?
+  menuItem        MenuItem @relation(fields: [menuItemId], references: [id])
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([menuItemId])
+}
+
+model Review {
+  id           String      @id @default(cuid())
+  /// Who left the review. Always the customer of the underlying order.
+  customerId   String
+  /// The order being rated. One row per (order, kind) below.
+  orderId      String
+  /// RESTAURANT or RIDER — selects which side is being rated.
+  kind         ReviewKind
+  /// Restaurant being rated. Required when kind=RESTAURANT, null when RIDER.
+  restaurantId String?
+  /// Rider being rated. Required when kind=RIDER, null when RESTAURANT.
+  riderId      String?
+  /// Points 1–5 inclusive — server-validated.
+  rating       Int
+  /// Free-form comment from the customer. Optional.
+  comment      String?
+  /// Partner's reply. Optional — only present for RESTAURANT reviews
+  /// (the rider-reply flow doesn't exist yet). Populated by the
+  /// PATCH /api/reviews/[id]/reply endpoint.
+  replyText    String?
+  repliedAt    DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  customer     User        @relation("CustomerReviews", fields: [customerId], references: [id])
+  order        Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  restaurant   Restaurant? @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  rider        User?       @relation("RiderReviews", fields: [riderId], references: [id])
+
+  @@unique([orderId, kind])
+  @@index([customerId])
+  @@index([restaurantId])
+  @@index([riderId])
+}
+
+model Notification {
+  id             String           @id @default(cuid())
+  userId         String
+  /// Display headline — short, single sentence.
+  title          String
+  /// Body of the notification. Optional — some events are headline-only.
+  message        String?
+  type           NotificationType @default(SYSTEM)
+  /// Read state. New rows default to `false`; the client flips via
+  /// PATCH /api/notifications/[id]/read or /api/notifications/read-all.
+  isRead         Boolean          @default(false)
+  /// Optional deep-link to the related order. Stored as a plain
+  /// string id (no FK) so deleting an order doesn't blow away the
+  /// notification history — the client just renders "Order no
+  /// longer available" if it tries to follow the link.
+  relatedOrderId String?
+  createdAt      DateTime         @default(now())
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt])
+  @@index([userId, createdAt])
+}
+
+/// A discount code customers can apply at checkout.
+///
+/// Codes are entered case-insensitively and stored uppercase. The
+/// server validates every property (active, expiry, usage cap,
+/// min-order) at apply-time and again at order-create so a stale
+/// "valid" response can't bypass expiry races.
+///
+/// Scope:
+/// • `restaurantId == null` → platform-wide, applies on any
+/// restaurant's items.
+/// • `restaurantId != null`  → scoped to that specific restaurant;
+/// the validate + order-create flow refuses the code if the cart
+/// doesn't contain at least one item from that restaurant.
+model PromoCode {
+  id               String            @id @default(cuid())
+  /// Uppercase code the customer types (e.g. "WELCOME50").
+  code             String            @unique
+  discountType     PromoDiscountType
+  /// Magnitude: percentage (1-100) or Taka (>=1), depending on type.
+  discountValue    Int
+  /// Minimum subtotal the order must hit before the code applies.
+  /// Null means "no minimum".
+  minOrderAmount   Int?
+  /// PERCENTAGE-only cap. Null = no cap (capped at subtotal).
+  maxDiscount      Int?
+  /// Null = never expires.
+  expiresAt        DateTime?
+  /// Inactive codes can't be applied but stay on the order history.
+  isActive         Boolean           @default(true)
+  /// Hard cap on total redemptions. Null = unlimited.
+  usageLimit       Int?
+  /// Counter incremented atomically when an order is placed.
+  usedCount        Int               @default(0)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  /// Optional FK to a Restaurant. NULL = platform-wide code;
+  /// set = scoped to that single restaurant's items only.
+  restaurantId     String?
+  /// True when the partner of `restaurantId` created this code
+  /// through the partner dashboard; false when the platform/admin
+  /// seeded it. Used by the partner endpoints to refuse editing
+  /// platform-wide codes they don't own.
+  createdByPartner Boolean           @default(false)
+  /// Optional image shown on the homepage promo carousel (and any
+  /// future surface). Stored as a data URL (the partner-side form
+  /// uploads via FileReader) OR an external https URL — both are
+  /// accepted; the carousel renders the value verbatim with an
+  /// attractive TicketIcon gradient fallback when this is null.
+  imageUrl         String?
+  /// কাজ ৫ — short human-readable tagline shown beside the code
+  /// on the customer-facing surfaces (homepage carousel card,
+  /// restaurant-detail chip modal). Optional; the carousel +
+  /// chip modal both fall back to the code + discount summary.
+  description      String?
+  restaurant       Restaurant?       @relation(fields: [restaurantId], references: [id])
+
+  @@index([isActive, expiresAt])
+  @@index([restaurantId, isActive])
+  @@index([restaurantId, createdAt])
+}
+
+/// A single audited event.
+///
+/// `userId` is nullable because some events are caused by the
+/// system itself (cron job, scheduled re-dispatch, etc.). For all
+/// current call sites there IS a user, but we keep the column
+/// optional so adding a system-initiated flow later doesn't need a
+/// schema change.
+model AuditLog {
+  id         String   @id @default(cuid())
+  /// Null = system action (no signed-in user triggered this).
+  userId     String?
+  /// Short, namespaced action key, e.g.
+  /// "ORDER_STATUS_CHANGED", "MENU_ITEM_DELETED",
+  /// "PROMO_CODE_CREATED". New action types are added by code —
+  /// no enum because the table is intentionally forward-compatible.
+  action     String
+  /// The kind of entity this event refers to, e.g. "Order",
+  /// "MenuItem", "Restaurant", "PromoCode". Stored as a string so
+  /// adding a new audited entity doesn't require a migration.
+  entityType String
+  /// The id of the affected entity. Storing as `String` (not a
+  /// foreign key) means deleting a row never cascades away its
+  /// audit trail — losing the entity should keep the history.
+  entityId   String
+  /// Snapshot of the relevant fields BEFORE the change. Optional
+  /// because "create" events have nothing to compare against.
+  oldValue   Json?
+  /// Snapshot of the relevant fields AFTER the change. Optional
+  /// because "delete" events don't have a post-state.
+  newValue   Json?
+  createdAt  DateTime @default(now())
+  user       User?    @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId, createdAt])
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+}
+
+/// Document uploaded by a partner during admin verification.
+///
+/// Stores a base64 data URL in `fileUrl` — same pattern as the
+/// menu-item image upload. We deliberately avoid a third-party
+/// storage URL for the demo data; production would swap this for
+/// an S3/GCS URL behind a ContentUrl builder.
+///
+/// Multiple documents per restaurant are allowed (e.g. trade
+/// license + NID + food safety cert). The admin verification queue
+/// shows all of them side-by-side.
+model RestaurantDocument {
+  id           String                 @id @default(cuid())
+  restaurantId String
+  documentType RestaurantDocumentType
+  /// base64 data URL OR https URL — see docstring above.
+  fileUrl      String
+  uploadedAt   DateTime               @default(now())
+  restaurant   Restaurant             @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId])
+}
+
+/// Document uploaded by a rider during admin verification
+/// (NID, driving licence, vehicle registration). Same pattern as
+/// RestaurantDocument — base64 data URL inside `fileUrl`.
+model RiderDocument {
+  id             String            @id @default(cuid())
+  riderProfileId String
+  documentType   RiderDocumentType
+  /// base64 data URL OR https URL.
+  fileUrl        String
+  uploadedAt     DateTime          @default(now())
+  riderProfile   RiderProfile      @relation(fields: [riderProfileId], references: [id], onDelete: Cascade)
+
+  @@index([riderProfileId])
+}
+
+/// A short-lived email verification code.
+///
+/// • `otpHash` stores SHA-256(otp) hex (NOT bcrypt — these codes
+/// are short enough that brute force across 5 attempts is fast,
+/// so we want deterministic + cheap comparison; the secret is
+/// the OTP itself, not its stored form).
+/// • `expiresAt` is set to now+10min on creation. The verify
+/// route treats any row past this as expired even if
+/// `consumedAt` is null.
+/// • `consumedAt` flips on the first successful verify so a
+/// code can't be re-used. The register API additionally
+/// refuses any code whose `attempts >= MAX_ATTEMPTS`.
+///
+/// Rate-limiting (60s cooldown + 5/hr cap per email) lives in
+/// memory inside the request route — see
+/// `app/api/auth/otp/request/route.ts`. A DB-backed counter would
+/// survive process restarts but adds a row per email per hour; the
+/// in-memory map is reset by the Next dev HMR loop and that's
+/// acceptable here.
+model EmailOtp {
+  id         String          @id @default(cuid())
+  email      String
+  /// SHA-256 hex of the 6-digit OTP. Plain text never stored.
+  otpHash    String
+  purpose    EmailOtpPurpose
+  expiresAt  DateTime
+  /// Number of failed verify attempts against THIS row. When this
+  /// exceeds the limit the row is treated as burnt (invalidation rules:
+  /// attempts < MAX_ATTEMPTS) regardless of outcome.
+  attempts   Int             @default(0)
+  /// Null until the user successfully completes the flow.
+  consumedAt DateTime?
+  createdAt  DateTime        @default(now())
+
+  @@index([email, purpose, consumedAt])
+}
+
+/// Feat 2 — Rider ↔ Customer chat during an active delivery. Each
+/// row is a single text message; the orderId FK ties the thread
+/// together. The rider dashboard and the order tracking page both
+/// render this list with 5-7s polling. The endpoint gate (status
+/// started >= PICKED_UP and < DELIVERED / CANCELLED) lives in the
+/// API route — this schema doesn't enforce it because status
+/// changes happen later than message reads and we don't want a
+/// FK-style constraint to block legitimate writes during a race.
+model OrderMessage {
+  id         String             @id @default(cuid())
+  orderId    String
+  senderId   String
+  senderRole OrderMessageSender
+  /// Plain-text message body. Trimmed + length-capped in the API
+  /// route (max 1000 chars). We don't bother with a separate
+  /// sanitiser — the dataset is closed (no public surface), so a
+  /// textContent column keeps reads cheap.
+  message    String
+  createdAt  DateTime           @default(now())
+
+  order  Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sender User  @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+}
+
+enum OrderMessageSender {
+  CUSTOMER
+  RIDER
+}
+
+/// Feat 3 — public contact-form submissions.
+///
+/// The /contact form posts here and the API also emails the
+/// `info.khaidai@gmail.com` address. The admin /admin/messages
+/// page surfaces unread entries first, with read state toggling
+/// on detail open. We don't model a relationship to User because
+/// contact submissions are public — anyone can submit without an
+/// account, and rate-limiting is per IP/email inside the route.
+model ContactMessage {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([isRead, createdAt])
+}
+
+enum UserRole {
+  CUSTOMER
+  PARTNER
+  RIDER
+  /// Platform administrator. Created via `scripts/create-admin.mjs`.
+  /// Can sign in at `/admin/login` and access `/admin/*` only — never
+  /// the customer / partner / rider trees. Suspended users (see
+  /// User.isSuspended) are refused at the login API regardless of role.
+  ADMIN
+}
+
+enum OrderStatus {
+  /// Order was placed. Awaiting Partner to start preparing.
+  PENDING
+  /// Partner accepted the order and is cooking it.
+  PREPARING
+  /// Rider picked up the food, heading to customer.
+  PICKED_UP
+  /// Same thing as PICKED_UP but in transit (used by partner dashboard's
+  /// status pill, maps to the same code path on the API).
+  ON_THE_WAY
+  DELIVERED
+  CANCELLED
+  /// Food is ready, dispatch is finding a rider.
+  READY
+  /// Dispatch picked a rider and is waiting on their Accept.
+  /// Has riderId + riderResponseDeadline set.
+  OFFERED_TO_RIDER
+}
+
+enum PaymentMethod {
+  CASH
+  BKASH
+  NAGAD
+  CARD
+}
+
+/// ধাপ ১ — SSLCommerz gateway status.
+///
+/// The lifecycle we model:
+///   • NOT_INITIATED — Order created at /api/orders, customer hasn't
+///     hit /api/payments/sslcommerz/init yet (or it's a COD order).
+///   • PENDING — init succeeded; SSLCommerz session key written;
+///     waiting on the customer's payment on the gateway page.
+///   • PAID — server-to-server validation confirmed payment; Order
+///     status moves to PREPARING.
+///   • FAILED — fail_url hit, OR validation said the payment
+///     didn't succeed.
+///   • CANCELLED — cancel_url hit (user closed the gateway).
+///
+/// Partner Orders query filters out NOT_INITIATED / FAILED / CANCELLED
+/// so an unpaid ghost order never shows up in the kitchen queue.
+enum PaymentGatewayStatus {
+  NOT_INITIATED
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+}
+
+/// Discount type applied by a PromoCode.
+enum PromoDiscountType {
+  /// Percentage off the order subtotal, capped by `maxDiscount` when set.
+  PERCENTAGE
+  /// Flat Taka amount off the order subtotal.
+  FIXED
+}
+
+/// ধাপ ২ — Email OTP purposes. Today only REGISTRATION is wired
+/// in (email is verified before any account row is created). New
+/// purposes (password reset, email change) should append here so
+/// the existing EmailOtp rows remain forward-compatible.
+enum EmailOtpPurpose {
+  REGISTRATION
+  /// কাজ ২ — Forgot password. Shares the same EmailOtp table +
+  /// SHA-256 hash + 10-min TTL + 5-attempt cap as REGISTRATION,
+  /// but lives in its own enum bucket so the two flows never
+  /// collide (a code minted for a signup can never be used to reset
+  /// a password, and vice versa).
+  PASSWORD_RESET
+}
+
+/// ধাপ ৪/৫ — admin verification workflow for partners + riders.
+/// Newly registered partners start PENDING until an admin reviews
+/// their documents and either approves or rejects them. Same flow
+/// for riders; their PENDING status blocks dispatch eligibility.
+enum VerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// ধাপ ৪ — RestaurantDocument types. Stored as `fileUrl` (data URL
+/// or external https URL). The enum is the audit-trail — admins
+/// reviewing the document know what it's meant to prove.
+enum RestaurantDocumentType {
+  TRADE_LICENSE
+  OWNER_NID
+  FOOD_SAFETY_CERT
+  OTHER
+}
+
+/// ধাপ ৫ — RiderDocument types. Mirrors RestaurantDocumentType.
+enum RiderDocumentType {
+  NID
+  DRIVING_LICENSE
+  VEHICLE_REGISTRATION
+  OTHER
+}
+
+enum AddressLabel {
+  HOME
+  WORK
+  OTHER
+}
+
+enum SavedPaymentKind {
+  BKASH
+  NAGAD
+  ROCKET
+  CARD
+}
+
+/// Where a partner or rider wants their payouts delivered. Mirrors
+/// the four wallet/card options exposed on the "Request Payout"
+/// modal in both the Partner Earnings and Rider Earnings pages.
+enum PayoutMethod {
+  BKASH
+  NAGAD
+  ROCKET
+  CARD
+}
+
+enum PayoutStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum ReviewKind {
+  /// Customer's rating of the restaurant that cooked the order.
+  RESTAURANT
+  /// Customer's rating of the rider who delivered the order.
+  RIDER
+}
+
+enum NotificationType {
+  /// "Your order is being prepared", "Rider is on the way", etc.
+  ORDER_UPDATE
+  /// "20% off at your favourite restaurant" — promo-style events.
+  PROMOTION
+  /// Anything that isn't order- or promo-related (payout completed,
+  /// account-level alerts, …).
+  SYSTEM
+}
+
+/// Feat 6 — referral state machine. Today only two states; the
+/// enum exists so a future "expired code" / "void" state can be
+/// added without a schema migration for the literal set.
+enum ReferralStatus {
+  PENDING
+  REWARDED
+}
+
+/**
+ * --------------------------------------------------------------------------
+ */
+/**
+ * Customer wallet (Feat 3 + Feat 4 + Feat 5)
+ */
+/**
+ * --------------------------------------------------------------------------
+ */
+
+/// Feat 3 — Customer's "KhaiDai Wallet". Auto-created on demand
+/// the first time the customer needs a credit (e.g. a paid order
+/// cancelled by the partner). 1 unit of `balance` = Taka 1.
+model Wallet {
+  id                String              @id @default(cuid())
+  /// One wallet per CustomerProfile. We use the profile id (not
+  /// userId) so a user that later changes role can't end up with
+  /// two wallets; a CUSTOMER profile is the unique key.
+  customerProfileId String              @unique
+  /// Cash balance in Taka (integer). Always ≥ 0 — withdrawals
+  /// debit; refunds/TOKEN_SWAPPED credit. Server-side only; the
+  /// client never trusts incoming `balance` values.
+  balance           Int                 @default(0)
+  /// Feat 4 — loyalty token balance. Earned at DELIVERED at 8% of
+  /// the order subtotal (rounded to the nearest integer). Swapped
+  /// to `balance` at the rate 1 token = ৳1 in multiples of 100.
+  tokenBalance      Int                 @default(0)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  customerProfile   CustomerProfile     @relation(fields: [customerProfileId], references: [id], onDelete: Cascade)
+  transactions      WalletTransaction[]
+
+  @@index([customerProfileId])
+}
+
+/// WalletTransaction — append-only audit of every balance/token
+/// change. The sign is part of the convention: a positive `amount`
+/// credits the wallet, negative debits. Combined with `type` the
+/// UI can render the right pill ("Refunded", "Tokens earned", …).
+model WalletTransaction {
+  id             String                @id @default(cuid())
+  walletId       String
+  type           WalletTransactionType
+  /// Signed integer in Taka (cash side) or tokens (token side).
+  /// Always > 0 in the `token_*` variants; sign-carried for the
+  /// cash variants (REFUND/CASHBACK positive, WITHDRAWAL negative).
+  amount         Int
+  /// When the entry is tied to a specific order.
+  relatedOrderId String?
+  /// Free-text reason shown in the customer's history list.
+  description    String
+  createdAt      DateTime              @default(now())
+  wallet         Wallet                @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  order          Order?                @relation(fields: [relatedOrderId], references: [id], onDelete: SetNull)
+
+  @@index([walletId, createdAt])
+  @@index([relatedOrderId])
+}
+
+/// Feat 3 — REFUND credit when a partner cancels a paid order.
+/// Feat 4 — TOKEN_EARNED / TOKEN_SWAPPED for the loyalty program.
+/// Feat 5 — WITHDRAWAL when a customer cashes out wallet balance.
+/// Feat 6 — REFERRAL_BONUS credited to both the referrer and the
+///          referee when the referee's first order is DELIVERED.
+/// ADJUSTMENT is reserved for admin-driven manual fixes.
+enum WalletTransactionType {
+  REFUND
+  CASHBACK
+  WITHDRAWAL
+  ADJUSTMENT
+  TOKEN_EARNED
+  TOKEN_SWAPPED
+  REFERRAL_BONUS
+}
+
+/// Feat 6 — Cross-instance rate limit.
+///
+/// In serverless (Vercel) every cold-start spins up a fresh
+/// function instance with no shared memory, so an in-process
+/// `Map<key, hits>` would silently reset between requests.
+/// The rate limiter writes a row to this table instead and
+/// counts the recent rows when deciding whether to allow a
+/// new request. The table is append-only — a periodic
+/// cleanup job (or a TTL via `createdAt < now() - 1 hour` in
+/// the query) keeps the cardinality bounded.
+model RateLimitEvent {
+  id        String   @id @default(cuid())
+  /// `OTP_REQUEST`, `PASSWORD_RESET`, `CONTACT_SUBMIT`, …
+  scope     String
+  /// Composite key the caller passes in (usually `ip|email`).
+  key       String
+  createdAt DateTime @default(now())
+
+  @@index([scope, key, createdAt])
+  @@index([createdAt])
+}

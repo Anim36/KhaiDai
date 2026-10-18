@@ -1,0 +1,61 @@
+◇ injected env (12) from .env
+seeded auth token, url: http://localhost:3000/login
+order: cmupco05f000izkbxj0nakhn8 
+gateway: https://sandbox.sslcommerz.com/EasyCheckOut/testcde960f44a056f82428f4df6a13c21b94fb
+
+=== VISIBLE TEXT ===
+ Demo .st0 { fill: #1d1e22; } Support .st2 { fill: #1d1e22; } FAQ3 .st1 { fill: #1d1e22; } Offers .st1 { fill: #1d1e22; } Login Cards Mobile Banking Net Banking Other Cards Save card & remember me .st4 { fill: #ef6c00; } By checking this box you agree to the Terms of Service Pay 261 BDT $('.nav-tabs').on('show.bs.tab', 'a', function(event) { event.preventDefault(); }); $('.nav-tabs').on('hide.bs.tab', 'a', function(event) { event.preventDefault(); }); window.dataLayer = window.dataLayer || []; function gtag(){dataLayer.push(arguments);} gtag('js', new Date()); gtag('config', 'UA-32646854-4'); 
+
+=== INPUTS ===
+[
+ {
+  "name": "number",
+  "id": "ccnum",
+  "type": "tel",
+  "placeholder": "Enter Card Number",
+  "maxlength": "20",
+  "visible": true
+ },
+ {
+  "name": "expiry",
+  "id": "expiry",
+  "type": "tel",
+  "placeholder": "MM/YY",
+  "maxlength": null,
+  "visible": true
+ },
+ {
+  "name": "cvc",
+  "id": "email",
+  "type": "password",
+  "placeholder": "CVC/CVV",
+  "maxlength": "4",
+  "visible": true
+ },
+ {
+  "name": "name",
+  "id": "",
+  "type": "text",
+  "placeholder": "Card Holder Name",
+  "maxlength": "25",
+  "visible": true
+ },
+ {
+  "name": "que_1",
+  "id": "remember_check",
+  "type": "checkbox",
+  "placeholder": null,
+  "maxlength": null,
+  "visible": true
+ }
+]
+
+=== BUTTONS ===
+[
+ {
+  "text": "Pay  261 BDT",
+  "cls": "loading-btn js_success-animation-trigger btn_full_width_disable",
+  "disabled": true,
+  "visible": true
+ }
+]

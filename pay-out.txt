@@ -1,0 +1,26 @@
+◇ injected env (12) from .env
+order: cmupd5bh3000rzkbxgknwn48a
+gateway: https://sandbox.sslcommerz.com/EasyCheckOut/testcdea5f324badc5f820ccbdc031876ddb492
+
+  PASS  after init: gateway status is PENDING, order still PENDING
+pay button disabled after filling: false
+  (clicking "" at step 1)
+  screen text:  Please wait. Your order is processing.... (To complete the process, please click "Continue" button if prompted. If you press the "Cancel" button, the process will not be completed.) Thanks for using SSLCOMMERZ. setTimeout("document.myForm.submit()",5000); 
+
+FINAL URL: http://localhost:3000/orders/cmupd5bh3000rzkbxgknwn48a/track?paid=1
+
+DB state: {
+  "paymentGatewayStatus": "PAID",
+  "gatewayTransactionId": "261001160025kjxTFV1b1QHKrvV",
+  "gatewaySessionKey": null,
+  "status": "PREPARING"
+}
+  PASS  paymentGatewayStatus === PAID (real validation passed)
+  PASS  gatewayTransactionId recorded
+  PASS  gatewaySessionKey cleared after payment
+  PASS  Order.status advanced PENDING -> PREPARING
+  PASS  redirected back to /orders/[id]/track
+  PASS  tracking URL carries the paid=1 indicator
+
+== RESULT: 7 passed, 0 failed ==
+

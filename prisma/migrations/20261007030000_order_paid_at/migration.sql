@@ -1,0 +1,21 @@
+-- ============================================================================
+-- 20261007030000_order_paid_at
+--
+-- Adds an optional `paidAt` timestamp to the Order table. Set when the
+-- SSLCommerz gateway confirms a successful payment (PAID), NULL for
+-- COD orders and orders paid before this column existed.
+--
+-- This column unlocks:
+--   • Auto-promote of freshly paid online orders from PENDING → PREPARING
+--     so the partner dashboard surfaces them immediately instead of
+--     leaving them stuck at PENDING until the partner clicks Accept.
+--   • A small "Paid Online" badge on the partner Incoming Orders row
+--     so the partner can distinguish COD from prepaid at a glance.
+--   • Future support / analytics (time-to-pay, payment-failure rate).
+--
+-- Nullable, no backfill: pre-existing PAID orders will look like NULL,
+-- which means "paid before we tracked this" — harmless.
+-- ============================================================================
+
+-- AlterTable
+ALTER TABLE "Order" ADD COLUMN "paidAt" TIMESTAMP(3);

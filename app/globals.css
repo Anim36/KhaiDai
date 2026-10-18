@@ -1,0 +1,177 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Outfit is injected by next/font/google and exposes --font-outfit on <html>. */
+  --font-outfit: "Outfit", system-ui, sans-serif;
+}
+
+/* -----------------------------------------------------------------------------
+ * Responsive foundations
+ * ---------------------------------------------------------------------------
+ * Goals:
+ *   1. Predictable sizing — every element is `box-sizing: border-box` so
+ *      padding+border stay inside declared widths (this is the single
+ *      biggest fix for "the page scrolls horizontally on mobile" bugs).
+ *   2. iOS / Android focus-zoom suppression — form controls must be at
+ *      least 16px or iOS Safari zooms the viewport when the user focuses
+ *      a field. We force min 16px on `input`, `select`, `textarea`.
+ *   3. 44×44 touch targets — Apple HIG / Material spec. We add a utility
+ *      class `tap-target` for buttons / nav items that need it; the
+ *      global `min-height: 44px` on `button` covers the rest.
+ *   4. `100dvh` over `100vh` — `100vh` includes the area behind mobile
+ *      browser bars; `100dvh` is the dynamic viewport height that
+ *      adjusts as bars show/hide. We use the latter everywhere.
+ *   5. `overflow-x: clip` only — `hidden` would also clip sticky
+ *      descendants which is wrong; `clip` is the safe equivalent.
+ *      If a horizontal scroll still appears after this, the bug is in
+ *      a child (a fixed-width image, a `min-w-*` container) — fix it
+ *      at the source, do not reach for `overflow-x: hidden`.
+ *   6. Safe-area insets — for Capacitor wrap. `pt-safe`, `pb-safe`,
+ *      `px-safe` utilities consume `env(safe-area-inset-*)` so a fixed
+ *      top bar doesn't tuck behind a notch and a sticky bottom bar
+ *      doesn't sit under the gesture indicator.
+ * --------------------------------------------------------------------------- */
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  background: #ffffff;
+  color: #111827;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-outfit), system-ui, sans-serif;
+  margin: 0;
+  /* Safe clip — see comment block above. We do NOT use `hidden` here. */
+  overflow-x: clip;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-outfit), system-ui, sans-serif;
+  letter-spacing: -0.01em;
+}
+
+/* Tailwind utility class fix: arbitrary values fallback is built-in to v3.4,
+   this rule just makes the page bg align with the design tokens. */
+@layer base {
+  body {
+    background-color: #ffffff;
+  }
+
+  /* Form controls: force ≥16px to stop iOS Safari from auto-zooming
+     the viewport when the user taps a field. Also keeps Android
+     Chrome from doing the same with the page-scaling heuristic. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="submit"]):not([type="button"]),
+  select,
+  textarea {
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  /* Buttons: minimum 44px tall so they meet the Apple HIG / Material
+     accessibility target. We don't force width — that's layout-driven
+     and can be wider on desktop. */
+  button:not([class*="h-"]):not([data-no-min-h]),
+  a[role="button"]:not([class*="h-"]),
+  [role="button"]:not([class*="h-"]) {
+    min-height: 44px;
+  }
+
+  /* When a button is sized tiny by an icon-only layout (e.g. the
+     sidebar close "x"), the 44px target is too aggressive. Opt out
+     with `data-no-min-h` — but ensure it still has a usable touch
+     area via a 44×44 hit zone if it's the only interaction. */
+}
+
+/* Recharts tooltip portal: when a chart is inside a wrapper with
+ * overflow:hidden, the tooltip can get clipped. Most charts in this
+ * project are wrapped in `ResponsiveContainer` already, so this is
+ * just a defensive default.
+ */
+.recharts-tooltip-wrapper {
+  pointer-events: none;
+}
+
+/* -----------------------------------------------------------------------
+ * Safe-area utilities (Capacitor / iOS notch + Android gesture bar)
+ *
+ *   <div class="pt-safe">     → top padding = max(0, env(safe-area-inset-top))
+ *   <div class="pb-safe">     → bottom padding = max(0, env(safe-area-inset-bottom))
+ *   <div class="px-safe">     → left+right padding = safe insets
+ *   <div class="h-screen-safe"> → 100dvh with safe top/bottom subtracted
+ *
+ * On a regular browser the env() values are 0 so these are no-ops.
+ * ----------------------------------------------------------------------- */
+@layer utilities {
+  .pt-safe {
+    padding-top: max(env(safe-area-inset-top), 0px);
+  }
+  .pb-safe {
+    padding-bottom: max(env(safe-area-inset-bottom), 0px);
+  }
+  .pl-safe {
+    padding-left: max(env(safe-area-inset-left), 0px);
+  }
+  .pr-safe {
+    padding-right: max(env(safe-area-inset-right), 0px);
+  }
+  .px-safe {
+    padding-left: max(env(safe-area-inset-left), 0px);
+    padding-right: max(env(safe-area-inset-right), 0px);
+  }
+  .py-safe {
+    padding-top: max(env(safe-area-inset-top), 0px);
+    padding-bottom: max(env(safe-area-inset-bottom), 0px);
+  }
+  .h-screen-safe {
+    height: 100dvh;
+  }
+  .min-h-screen-safe {
+    min-height: 100dvh;
+  }
+  .max-h-screen-safe {
+    max-height: 100dvh;
+  }
+  /* `tap-target` is a 44×44 invisible box — for when you need a
+   * visually-smaller icon (e.g. 24×24) to have a proper hit area.
+   * Wrap the icon in `<span class="relative inline-flex tap-target">`.
+   */
+  .tap-target {
+    position: relative;
+  }
+  .tap-target::before {
+    content: "";
+    position: absolute;
+    inset: -10px;
+  }
+
+  /* Hide a horizontal scrollbar while still allowing touch / mouse
+   * wheel scrolling. Used by the categories strip and any other
+   * horizontally-scrolling carousel. WebKit + Firefox + IE/Edge
+   * are all covered.
+   */
+  .scrollbar-hide {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}

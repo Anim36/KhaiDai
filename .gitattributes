@@ -1,0 +1,40 @@
+# Normalize line endings for cross-platform contributors.
+# (Windows checkouts default to CRLF; macOS/Linux checkouts default
+# to LF. Without this, the entire file shows as a "changed line" on
+# every clone.)
+
+# Default: LF in the index, native on checkout.
+* text=auto eol=lf
+
+# Shell scripts and PowerShell scripts must keep LF (LF is the
+# universal expectation for *nix; PowerShell 7+ runs on Linux too).
+*.sh   text eol=lf
+*.ps1  text eol=lf
+*.cmd  text eol=lf
+*.bash text eol=lf
+
+# Windows batch files MUST be CRLF (cmd.exe doesn't handle LF).
+*.bat  text eol=crlf
+
+# Lockfiles and minified JS/CSS — keep them byte-identical, no
+# newline conversion.
+package-lock.json binary
+yarn.lock         binary
+pnpm-lock.yaml    binary
+
+# Images, fonts, archives — binary.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.ico  binary
+*.svg  binary
+*.woff binary
+*.woff2 binary
+*.ttf  binary
+*.eot  binary
+*.pdf  binary
+*.zip  binary
+*.tar  binary
+*.gz   binary

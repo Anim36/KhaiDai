@@ -1,0 +1,3 @@
+◇ injected env (12) from .env
+http: status=SUCCESS url=https://sandbox.sslcommerz.com/EasyCheckOut/testcde5e39c805f4ca6219170c1a2525e23d3d
+https: status=SUCCESS url=https://sandbox.sslcommerz.com/EasyCheckOut/testcde6065026a30566fbd7021d7d602edc982
