@@ -458,14 +458,19 @@ export function TopNav({
               // browser re-lays-out every frame, which makes the pills visibly
               // tremble instead of gliding. max-height transitions interpolate
               // cleanly and avoid the mid-animation re-layout.
-              "overflow-hidden transition-[max-height,opacity] duration-200 ease-out motion-reduce:transition-none " +
+              //
+              // The collapsed/expanded heights match the EXACT natural
+              // height of the two `h-10` rows + `gap-2` (40 + 8 + 40 = 88px)
+              // so the animation ends flush with the next sibling, and we
+              // add `will-change-[max-height]` to hint the compositor.
+              "overflow-hidden will-change-[max-height] transition-[max-height] duration-200 ease-out motion-reduce:transition-none " +
               (rowsExpanded
-                ? "max-h-[120px] opacity-100"
-                : "max-h-0 opacity-0")
+                ? "max-h-[88px]"
+                : "max-h-0")
             }
             aria-hidden={!rowsExpanded}
           >
-            <div className="flex min-h-0 flex-col gap-1.5">
+            <div className="flex min-h-0 flex-col gap-2">
               {/* Row 2: location pill (full width, truncated) */}
               <button
                 type="button"
