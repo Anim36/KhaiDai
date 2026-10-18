@@ -49,7 +49,7 @@ import { chromium } from 'playwright';
 import { config as loadEnv } from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 loadEnv({ path: join(ROOT, '.env') });
